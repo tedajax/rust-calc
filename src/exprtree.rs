@@ -59,6 +59,10 @@ impl ExprTree {
 		}
 	}
 
+	pub fn build(expression: &str) {
+		
+	}
+
 	pub fn eval(&self) -> f64 {
 		match self.root {
 			None => 0_f64,
@@ -111,6 +115,7 @@ impl ExprTree {
 	fn eval_unary(operator: &String, value: f64) -> f64 {
 		match operator.as_slice() {
 			"-" => -value,
+			"ln" => value.ln(),
 			_ => 0_f64,
 		}
 	}
