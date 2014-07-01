@@ -5,7 +5,6 @@ use std::string::String;
 pub struct ExprNode {
     token: String,
     value: Option<f64>,
-    precedence: i32,
     left: Option<Box<ExprNode>>,
     right: Option<Box<ExprNode>>,
 }
@@ -14,19 +13,10 @@ impl ExprNode {
     pub fn new(token: &str,
         left: Option<ExprNode>,
         right: Option<ExprNode>) -> ExprNode {
-
-        let token = String::from_str(token);
-        let precedence: i32;
-        let value = from_str::<f64>(token.as_slice());
-        match value {
-            None => precedence = operator_precedence(&token),
-            Some(ref v) => precedence = 0,
-        }
-
+        
         ExprNode {
-            token: token,
-            value: value,
-            precedence: precedence,
+            token: String::from_str(token),
+            value: from_str::<f64>(token),
             left: match left {
                 None => None,
                 Some(l) => Some(box l),
@@ -64,6 +54,12 @@ impl OperatorType {
     }
 }
 
+#[deriving(PartialEq)]
+enum OperatorAssoc {
+    LeftAssoc,
+    RightAssoc,
+}
+
 fn operator_precedence(operator: &String) -> i32 {
     match operator.as_slice() {
         "^" => 4,
@@ -73,7 +69,14 @@ fn operator_precedence(operator: &String) -> i32 {
     }
 }
 
-#[deriving(Show)]
+fn operator_assoc(operator: &String) -> OperatorAssoc {
+    match operator.as_slice() {
+        "^" => RightAssoc,
+        _ => LeftAssoc,
+    }
+}
+
+#[deriving(Show, Clone, PartialEq)]
 enum TokenType {
     Numeric,
     Alphabetical,
@@ -101,9 +104,8 @@ impl TokenType {
     }
 }
 
+// token type, token string, token precedence
 struct Token(TokenType, String, i32);
-
-static MAX_PRECEDENCE: i32 = 5;
 
 pub struct ExprTree {
     root: Option<Box<ExprNode>>,
@@ -120,73 +122,35 @@ impl ExprTree {
     }
 
     pub fn build(expression: &str) -> ExprTree {
-        let mut nodes: Vec<ExprNode> = vec![];
-
         let tokens = ExprTree::parse_tokens(expression);
+        let rpn = ExprTree::build_rpn(tokens);
+        ExprTree::from_rpn(rpn)
+    }
 
-        for token in tokens.iter() {
-            let &Token(ref ttype, ref expr, ref prec) = token;
-            nodes.push(ExprNode::new(expr.as_slice(), None, None));
+    fn from_rpn(rpn: Vec<Token>) -> ExprTree {
+        let mut stack: Vec<ExprNode> = vec![];
+
+        for token in rpn.iter() {
+            let &Token(ttype, ref tstr, tprec) = token;
+
+            match ttype {
+                Numeric => stack.push(ExprNode::new(tstr.as_slice(), None, None)),
+                Operator => {
+                    let right = stack.pop();
+                    let left = stack.pop();
+                    stack.push(ExprNode::new(tstr.as_slice(), left, right));
+                },
+                _ => {},
+            }
         }
 
-        let mut used_nodes_vec: Vec<bool> = vec![];
-        for n in nodes.iter() {
-            used_nodes_vec.push(false);
-        }
-
-        let mut used_nodes: &mut [bool] = used_nodes_vec.as_mut_slice();
-
-        let tree_root: ExprNode;
-        let mut top_index: uint = 0;
-
-        loop {
-            //find highest priority node
-            let len = nodes.len();
-            let mut max_prec = 0;
-            for i in range(0, len) {
-                let n = nodes.get(i);
-                if n.precedence > max_prec && !used_nodes[i] {
-                    max_prec = n.precedence;
-                    top_index = i;
-                }
-            }
-
-            used_nodes[top_index] = true;
-
-            if max_prec == 0 {
-                tree_root = nodes.get(top_index).clone();
-                break; 
-            }
-
-            let left_index: uint;
-            if top_index == 0 {
-                left_index = 0;
-            } else {
-                left_index = top_index - 1;
-            }
-
-            let right_index = top_index + 1;
-
-            let left = nodes.get(left_index).clone();
-            let right = nodes.get(right_index).clone();
-
-            let top = nodes.get_mut(top_index);
-
-            if !left.is_operator() {
-                top.left = Some(box left);
-            }
-
-            top.right = Some(box right);
-        }
-
-        ExprTree::new(Some(tree_root))
+        ExprTree::new(Some(stack.get(0).clone()))
     }
 
     fn parse_tokens(expression: &str) -> Vec<Token> {
         let mut result: Vec<Token> = vec![];
 
         let mut i = 0;
-        let mut prec_mult = 0;
         let mut accumulator = String::new();
         let len = expression.len();
         while i < len {
@@ -200,8 +164,7 @@ impl ExprTree {
             match token_type {
                 Operator => {
                     let op_str = str::from_char(c);
-                    let mut op_prec = operator_precedence(&op_str);
-                    op_prec += prec_mult * MAX_PRECEDENCE;
+                    let op_prec = operator_precedence(&op_str);
                     result.push(Token(token_type, op_str, op_prec));
                 },
                 Numeric => {
@@ -226,16 +189,10 @@ impl ExprTree {
                     i = j - 1;
                 },
                 LeftParen => {
-                    prec_mult += 1;
-                    //result.push(Token(token_type, String::from_str("("), 0));
+                    result.push(Token(LeftParen, String::from_str("("), 0));
                 },
                 RightParen => {
-                    prec_mult -= 1;
-                    //result.push(Token(token_type, String::from_str(")"), 0));
-                    if prec_mult < 0 {
-                        fail!("Parenthesis mismatch: \
-                               more closing parenthesis than opening.");
-                    }
+                    result.push(Token(RightParen, String::from_str(")"), 0));
                 },
                 _ => {},
             }
@@ -243,12 +200,79 @@ impl ExprTree {
             i += 1;
         }
 
-        if prec_mult > 0 {
-            fail!("Parenthesis mismatch: \
-                   more opening parenthesis than closing.");
+        result
+    }
+
+    // put the tokens into reverse polish notation
+    fn build_rpn(tokens: Vec<Token>) -> Vec<Token> {
+        let mut output_queue: Vec<Token> = vec![];
+        let mut input_stack: Vec<Token> = vec![];
+
+        for token in tokens.iter() {
+            let &Token(ttype, ref tstr, tprec) = token;
+
+            match ttype {
+                Numeric => {
+                    output_queue.push(Token(ttype, tstr.clone(), tprec))
+                },
+                Operator => {
+                    loop {
+                        match input_stack.pop() {
+                            None => break,
+                            Some(o2) => {
+                                let Token(o2type, ref o2str, o2prec) = o2;
+                                
+                                let assoc = operator_assoc(o2str);
+
+                                if o2type == Operator &&
+                                   (assoc == LeftAssoc && tprec <= o2prec ||
+                                    tprec < o2prec) {
+                                    output_queue.push(Token(o2type, o2str.clone(), o2prec));
+                                } else {
+                                    input_stack.push(Token(o2type, o2str.clone(), o2prec));
+                                    break;
+                                }
+                            },
+                        }
+                    }
+                    input_stack.push(Token(ttype, tstr.clone(), tprec));
+                },
+                LeftParen => input_stack.push(Token(ttype, tstr.clone(), tprec)),
+                RightParen => {
+                    loop {
+                        match input_stack.pop() {
+                            None => fail!("Parenthesis mismatch!"),
+                            Some(o2) => {
+                                let Token(o2type, ref o2str, o2prec) = o2;
+                                if o2type != LeftParen {
+                                    output_queue.push(Token(o2type, o2str.clone(), o2prec));
+                                } else {
+                                    break;
+                                }
+                            },
+                        }
+                    }
+                },
+                _ => {},
+            }
         }
 
-        result
+        loop {
+            match input_stack.pop() {
+                None => break,
+                Some(o2) => {
+                    let Token(o2type, ref o2str, o2prec) = o2;
+                    match o2type {
+                        LeftParen|RightParen => fail!("Parenthesis mismatch!"),
+                        _ => {
+                            output_queue.push(Token(o2type, o2str.clone(), o2prec));
+                        },
+                    }
+                },
+            }
+        }
+       
+        return output_queue;
     }
 
     pub fn eval(&self) -> f64 {
@@ -314,6 +338,7 @@ impl ExprTree {
             "-" => lhs - rhs,
             "*" => lhs * rhs,
             "/" => lhs / rhs,
+            "^" => lhs.powf(rhs),
             _ => 0_f64,
         }
     }
