@@ -1,7 +1,12 @@
-use exprtree::{ExprNode, ExprTree};
+use exprtree::ExprTree;
+use std::os;
 
 mod exprtree;
 
 fn main() {
-    println!("{}", ExprTree::build("20.5*2").eval());
+    let args = os::args();
+    let expression = args.get(1);
+
+    let tree = ExprTree::build(expression.as_slice());
+    println!("{}", tree.eval());
 }

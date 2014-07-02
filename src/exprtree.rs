@@ -13,10 +13,15 @@ impl ExprNode {
     pub fn new(token: &str,
         left: Option<ExprNode>,
         right: Option<ExprNode>) -> ExprNode {
+
+        let value = match from_str::<f64>(token) {
+            Some(v) => Some(v),
+            None => constant_value(token.as_slice()),
+        };
         
         ExprNode {
             token: String::from_str(token),
-            value: from_str::<f64>(token),
+            value: value,
             left: match left {
                 None => None,
                 Some(l) => Some(box l),
@@ -27,30 +32,29 @@ impl ExprNode {
             },
         }
     }
-
-    pub fn is_operator(&self) -> bool {
-        match self.value {
-            None => true,
-            Some(v) => false,
-        }
-    }
 }
 
 enum OperatorType {
     Unary,
     Binary,
-    Both,
     NoOp,
 }
 
 impl OperatorType {
     fn of_operator(operator: &String) -> OperatorType {
-        match operator.as_slice() {
-            "+"|"*"|"/"|"^" => Binary,
-            "ln" => Unary,
-            "-" => Both,
-            _ => NoOp,
+        let mut c = ' ';
+        for ch in operator.as_slice().chars() {
+            c = ch;
+            break;
         }
+
+        match TokenType::of_char(c) {
+            Alphabetical => Unary,
+            _ => match operator.as_slice() {
+                "+"|"-"|"*"|"/"|"^" => Binary,
+                _ => NoOp,
+            }
+        }        
     }
 }
 
@@ -76,10 +80,18 @@ fn operator_assoc(operator: &String) -> OperatorAssoc {
     }
 }
 
+fn constant_value(constant: &str) -> Option<f64> {
+    match constant.as_slice() {
+        "pi" => Some(Float::pi()),
+        _ => None,
+    }
+}
+
 #[deriving(Show, Clone, PartialEq)]
 enum TokenType {
     Numeric,
     Alphabetical,
+    Functional,
     Operator,
     LeftParen,
     RightParen,
@@ -100,6 +112,13 @@ impl TokenType {
             RightParen
         } else {
             Invalid
+        }
+    }
+
+    pub fn of_alphabeticals(s: String) -> TokenType {
+        match s.as_slice() {
+            "pi" => Numeric,
+            _ => Operator,
         }
     }
 }
@@ -153,6 +172,8 @@ impl ExprTree {
         let mut i = 0;
         let mut accumulator = String::new();
         let len = expression.len();
+        let mut prev_char = ' ';
+        let mut negate_flag = false;
         while i < len {
             let copt = expression.chars().nth(i);
             let c = match copt {
@@ -160,7 +181,21 @@ impl ExprTree {
                 Some(ch) => ch,
             };
 
-            let token_type = TokenType::of_char(c);
+            if !negate_flag &&
+               TokenType::of_char(prev_char) == Operator &&
+               c == '-' {
+                negate_flag = true;
+                continue;
+            }
+
+            let token_type;
+
+            if negate_flag {
+                token_type = Numeric;
+            } else {
+                token_type = TokenType::of_char(c);
+            }
+
             match token_type {
                 Operator => {
                     let op_str = str::from_char(c);
@@ -188,6 +223,33 @@ impl ExprTree {
                     accumulator.truncate(0);
                     i = j - 1;
                 },
+                Alphabetical => {
+                    accumulator.push_char(c);
+                    let mut j = i + 1;
+                    while j < len {
+                        let ncopt = expression.chars().nth(j);
+                        match ncopt {
+                            Some(nc) =>
+                                match TokenType::of_char(nc) {
+                                    Alphabetical => accumulator.push_char(nc),
+                                    _ => break,
+                                },
+                            _ => {},
+                        }
+                        j += 1;
+                    }
+
+                    let alpha_str = accumulator.clone();
+                    match TokenType::of_alphabeticals(alpha_str.clone()) {
+                        Operator => result.push(Token(Operator, alpha_str, 0)),
+                        Numeric => result.push(Token(Numeric,
+                                                     alpha_str,
+                                                     0)),
+                        _ => {},
+                    }                    
+                    accumulator.truncate(0);
+                    i = j - 1;
+                },
                 LeftParen => {
                     result.push(Token(LeftParen, String::from_str("("), 0));
                 },
@@ -197,6 +259,7 @@ impl ExprTree {
                 _ => {},
             }
 
+            prev_char = c;
             i += 1;
         }
 
@@ -282,6 +345,35 @@ impl ExprTree {
         }
     }
 
+    #[allow(dead_code)]
+    pub fn print(&self) {
+        match self.root {
+            Some(ref node) => ExprTree::print_node(node),
+            None => {},
+        }
+        println!("");
+    }
+
+    #[allow(dead_code)]
+    fn print_node(node: &Box<ExprNode>) {
+        match node.value {
+            Some(v) => print!("{}", v),
+            None => {
+                print!("(");
+                match node.left {
+                    Some(ref left) => ExprTree::print_node(left),
+                    None => {},
+                }
+                print!("{}", node.token);
+                match node.right {
+                    Some(ref right) => ExprTree::print_node(right),
+                    None => {},
+                }
+                print!(")");
+            }
+        }
+    }
+
     fn eval_node(node: &Box<ExprNode>) -> f64 {
         match node.value {
             Some(v) => v,
@@ -306,16 +398,6 @@ impl ExprTree {
                                         ExprTree::eval_node(right))
                                 }
                             },
-                            Both => {
-                                match node.left {
-                                    None => ExprTree::eval_unary(operator,
-                                        ExprTree::eval_node(right)),
-                                    Some(ref left) => 
-                                        ExprTree::eval_binary(operator,
-                                        ExprTree::eval_node(left),
-                                        ExprTree::eval_node(right))
-                                }   
-                            },
                             _ => 0_f64,
                         }
                     }
@@ -328,6 +410,14 @@ impl ExprTree {
         match operator.as_slice() {
             "-" => -value,
             "ln" => value.ln(),
+            "lg" => value.log2(),
+            "log" => value.log10(),
+            "sin" => value.sin(),
+            "cos" => value.cos(),
+            "tan" => value.tan(),
+            "csc" => 1_f64 / value.sin(),
+            "sec" => 1_f64 / value.cos(),
+            "cot" => 1_f64 / value.tan(),
             _ => 0_f64,
         }
     }
