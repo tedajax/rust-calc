@@ -8,5 +8,6 @@ fn main() {
     let expression = args.get(1);
 
     let tree = ExprTree::build(expression.as_slice());
+    tree.print();
     println!("{}", tree.eval());
 }

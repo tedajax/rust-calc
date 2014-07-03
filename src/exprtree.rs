@@ -83,6 +83,7 @@ fn operator_assoc(operator: &String) -> OperatorAssoc {
 fn constant_value(constant: &str) -> Option<f64> {
     match constant.as_slice() {
         "pi" => Some(Float::pi()),
+        "e" => Some(Float::e()),
         _ => None,
     }
 }
@@ -130,6 +131,15 @@ pub struct ExprTree {
     root: Option<Box<ExprNode>>,
 }
 
+fn print_token_list(title: &str, tokens: &Vec<Token>) {
+    print!("{}: ", title);
+    for t in tokens.iter() {
+        let &Token(_, ref ts, _) = t;
+        print!("{} ", ts);
+    }
+    println!("");
+}
+
 impl ExprTree {
     pub fn new(root: Option<ExprNode>) -> ExprTree {
         ExprTree {
@@ -150,7 +160,7 @@ impl ExprTree {
         let mut stack: Vec<ExprNode> = vec![];
 
         for token in rpn.iter() {
-            let &Token(ttype, ref tstr, tprec) = token;
+            let &Token(ttype, ref tstr, _) = token;
 
             match ttype {
                 Numeric => stack.push(ExprNode::new(tstr.as_slice(), None, None)),
@@ -318,6 +328,9 @@ impl ExprTree {
                 },
                 _ => {},
             }
+
+            print_token_list("output", &output_queue);
+            print_token_list("input", &input_stack);
         }
 
         loop {
@@ -333,6 +346,8 @@ impl ExprTree {
                     }
                 },
             }
+            print_token_list("output", &output_queue);
+            print_token_list("input", &input_stack);
         }
        
         return output_queue;
@@ -361,10 +376,13 @@ impl ExprTree {
             None => {
                 print!("(");
                 match node.left {
-                    Some(ref left) => ExprTree::print_node(left),
+                    Some(ref left) => {
+                        ExprTree::print_node(left);
+                        print!(" ");
+                    },
                     None => {},
                 }
-                print!("{}", node.token);
+                print!("{} ", node.token);
                 match node.right {
                     Some(ref right) => ExprTree::print_node(right),
                     None => {},
@@ -379,10 +397,11 @@ impl ExprTree {
             Some(v) => v,
             None => {
                 let ref operator = node.token;
+                println!("{}", operator);
                 let ot = OperatorType::of_operator(operator);
                 
                 match node.right {
-                    None => 0_f64,
+                    None => fail!("No available value for operator."),
                     Some(ref right) => {
                         match ot {
                             Unary => {
@@ -391,7 +410,7 @@ impl ExprTree {
                             },
                             Binary => {
                                 match node.left {
-                                    None => 0_f64,
+                                    None => fail!("No available value for operator."),
                                     Some(ref left) => 
                                         ExprTree::eval_binary(operator,
                                         ExprTree::eval_node(left),
