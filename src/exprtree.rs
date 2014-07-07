@@ -119,7 +119,7 @@ impl TokenType {
     pub fn of_alphabeticals(s: String) -> TokenType {
         match s.as_slice() {
             "pi" => Numeric,
-            _ => Operator,
+            _ => Functional,
         }
     }
 }
@@ -169,111 +169,15 @@ impl ExprTree {
                     let left = stack.pop();
                     stack.push(ExprNode::new(tstr.as_slice(), left, right));
                 },
+                Functional => {
+                    let right = stack.pop();
+                    stack.push(ExprNode::new(tstr.as_slice(), None, right));
+                }
                 _ => {},
             }
         }
 
         ExprTree::new(Some(stack.get(0).clone()))
-    }
-
-    fn parse_tokens(expression: &str) -> Vec<Token> {
-        let mut result: Vec<Token> = vec![];
-
-        let mut i = 0;
-        let mut accumulator = String::new();
-        let len = expression.len();
-        let mut prev_char = ' ';
-        let mut negate_flag = false;
-        while i < len {
-            let copt = expression.chars().nth(i);
-            let c = match copt {
-                None => ' ',
-                Some(ch) => ch,
-            };
-
-            if !negate_flag &&
-               TokenType::of_char(prev_char) == Operator &&
-               c == '-' {
-                negate_flag = true;
-                continue;
-            }
-
-            let token_type;
-
-            if negate_flag {
-                token_type = Numeric;
-            } else {
-                token_type = TokenType::of_char(c);
-            }
-
-            match token_type {
-                Operator => {
-                    let op_str = str::from_char(c);
-                    let op_prec = operator_precedence(&op_str);
-                    result.push(Token(token_type, op_str, op_prec));
-                },
-                Numeric => {
-                    accumulator.push_char(c);
-                    let mut j = i + 1;
-                    while j < len {
-                        let ncopt = expression.chars().nth(j);
-                        match ncopt {
-                            Some(nc) =>
-                                match TokenType::of_char(nc) {
-                                    Numeric => accumulator.push_char(nc),
-                                    _ => break,
-                                },
-                            _ => {},
-                        }
-                        j += 1;
-                    }
-
-                    let num_str = accumulator.clone();
-                    result.push(Token(token_type, num_str, 0));
-                    accumulator.truncate(0);
-                    i = j - 1;
-                },
-                Alphabetical => {
-                    accumulator.push_char(c);
-                    let mut j = i + 1;
-                    while j < len {
-                        let ncopt = expression.chars().nth(j);
-                        match ncopt {
-                            Some(nc) =>
-                                match TokenType::of_char(nc) {
-                                    Alphabetical => accumulator.push_char(nc),
-                                    _ => break,
-                                },
-                            _ => {},
-                        }
-                        j += 1;
-                    }
-
-                    let alpha_str = accumulator.clone();
-                    match TokenType::of_alphabeticals(alpha_str.clone()) {
-                        Operator => result.push(Token(Operator, alpha_str, 0)),
-                        Numeric => result.push(Token(Numeric,
-                                                     alpha_str,
-                                                     0)),
-                        _ => {},
-                    }                    
-                    accumulator.truncate(0);
-                    i = j - 1;
-                },
-                LeftParen => {
-                    result.push(Token(LeftParen, String::from_str("("), 0));
-                },
-                RightParen => {
-                    result.push(Token(RightParen, String::from_str(")"), 0));
-                },
-                _ => {},
-            }
-
-            prev_char = c;
-            i += 1;
-        }
-
-        result
     }
 
     // put the tokens into reverse polish notation
@@ -287,6 +191,9 @@ impl ExprTree {
             match ttype {
                 Numeric => {
                     output_queue.push(Token(ttype, tstr.clone(), tprec))
+                },
+                Functional => {
+                    input_stack.push(Token(ttype, tstr.clone(), tprec))
                 },
                 Operator => {
                     loop {
@@ -353,6 +260,83 @@ impl ExprTree {
         return output_queue;
     }
 
+    fn parse_tokens(expression: &str) -> Vec<Token> {
+        let mut result: Vec<Token> = vec![];
+
+        let mut i = 0;
+        let mut accumulator = String::new();
+        let len = expression.len();
+        while i < len {
+            let copt = expression.chars().nth(i);
+            let c = match copt {
+                None => ' ',
+                Some(ch) => ch,
+            };
+
+            let token_type = TokenType::of_char(c);
+            match token_type {
+                Operator => {
+                    let op_str = str::from_char(c);
+                    let op_prec = operator_precedence(&op_str);
+                    result.push(Token(token_type, op_str, op_prec));
+                },
+                Numeric => {
+                    accumulator.push_char(c);
+                    let mut j = i + 1;
+                    while j < len {
+                        let ncopt = expression.chars().nth(j);
+                        match ncopt {
+                            Some(nc) =>
+                                match TokenType::of_char(nc) {
+                                    Numeric => accumulator.push_char(nc),
+                                    _ => break,
+                                },
+                            _ => {},
+                        }
+                        j += 1;
+                    }
+
+                    let num_str = accumulator.clone();
+                    result.push(Token(token_type, num_str, 0));
+                    accumulator.truncate(0);
+                    i = j - 1;
+                },
+                Alphabetical => {
+                    accumulator.push_char(c);
+                    let mut j = i + 1;
+                    while j < len {
+                        let ncopt = expression.chars().nth(j);
+                        match ncopt {
+                            Some(nc) =>
+                                match TokenType::of_char(nc) {
+                                    Alphabetical => accumulator.push_char(nc),
+                                    _ => break,
+                                },
+                            _ => {},
+                        }
+                        j += 1;
+                    }
+
+                    let alpha_str = accumulator.clone();
+                    let atype = TokenType::of_alphabeticals(alpha_str.clone());
+                    result.push(Token(atype, alpha_str, 0));
+                    accumulator.truncate(0);
+                    i = j - 1;
+                },
+                LeftParen => {
+                    result.push(Token(LeftParen, String::from_str("("), 0));
+                },
+                RightParen => {
+                    result.push(Token(RightParen, String::from_str(")"), 0));
+                },
+                _ => {},
+            }
+            i += 1;
+        }
+
+        result
+    }
+
     pub fn eval(&self) -> f64 {
         match self.root {
             None => 0_f64,
@@ -397,7 +381,6 @@ impl ExprTree {
             Some(v) => v,
             None => {
                 let ref operator = node.token;
-                println!("{}", operator);
                 let ot = OperatorType::of_operator(operator);
                 
                 match node.right {
@@ -410,7 +393,8 @@ impl ExprTree {
                             },
                             Binary => {
                                 match node.left {
-                                    None => fail!("No available value for operator."),
+                                    None => ExprTree::eval_unary(operator,
+                                                ExprTree::eval_node(right)),
                                     Some(ref left) => 
                                         ExprTree::eval_binary(operator,
                                         ExprTree::eval_node(left),
@@ -437,7 +421,9 @@ impl ExprTree {
             "csc" => 1_f64 / value.sin(),
             "sec" => 1_f64 / value.cos(),
             "cot" => 1_f64 / value.tan(),
-            _ => 0_f64,
+            "neg" => -value,
+            "sgn" => value.signum(),
+            _ => fail!("Invalid unary operator"),
         }
     }
 
